@@ -126,4 +126,17 @@ elif [[ -f $SNAP/default.env ]]; then
   apply_cursor_font "${CURSOR:-Adwaita}" "${CURSOR_SIZE:-24}" "${FONT:-Adwaita Sans 11}" "${DOCFONT:-Adwaita Sans 11}"
 fi
 
+# Menu / launcher font. macos.lua sets OMARCHY_MENU_FONT=Inter in Hyprland's
+# environment for macOS themes and clears it otherwise; the shell only reads it
+# when it starts, so restart the shell when the running value is wrong.
+want_menu_font=""
+$mac && want_menu_font="Inter"
+shell_pid=$(pgrep -f "^quickshell .*/omarchy/shell" | head -n 1)
+if [[ -n $shell_pid ]]; then
+  have_menu_font=$(tr '\0' '\n' <"/proc/$shell_pid/environ" 2>/dev/null | sed -n 's/^OMARCHY_MENU_FONT=//p')
+  if [[ $have_menu_font != "$want_menu_font" ]]; then
+    setsid -f bash -c 'sleep 1; omarchy-restart-shell' >/dev/null 2>&1 </dev/null
+  fi
+fi
+
 exit 0

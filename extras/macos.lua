@@ -9,6 +9,9 @@ do
   local theme = f and f:read("*l") or ""
   if f then f:close() end
   if theme ~= "macos-tahoe" and theme ~= "macos-tahoe-light" then
+    -- Environment variables outlive a reload, so clear the ones set below;
+    -- an empty OMARCHY_MENU_FONT makes the menu use the normal font again.
+    hl.env("OMARCHY_MENU_FONT", "")
     return
   end
 end
