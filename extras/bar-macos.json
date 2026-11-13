@@ -1,0 +1,26 @@
+{
+  "background": "none",
+  "position": "top",
+  "layout": {
+    "left": [
+      { "id": "omarchy.menu" },
+      { "id": "omarchy.active-window" }
+    ],
+    "centerBegin": [],
+    "center": [],
+    "centerEnd": [],
+    "right": [
+      { "id": "omarchy.indicators" },
+      { "id": "omarchy.system-update" },
+      { "id": "omarchy.tray" },
+      { "id": "omarchy.keyboard-layout" },
+      { "id": "omarchy.bluetooth" },
+      { "id": "omarchy.network" },
+      { "id": "omarchy.audio" },
+      { "id": "omarchy.monitor" },
+      { "id": "omarchy.power" },
+      { "id": "omarchy.clock", "format": "ddd d MMM  HH:mm", "formatAlt": "dddd d MMMM yyyy  HH:mm:ss" }
+    ],
+    "tray": []
+  }
+}

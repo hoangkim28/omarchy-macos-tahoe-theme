@@ -1,0 +1,129 @@
+#!/bin/bash
+# macOS Tahoe: hide window buttons and titlebars ONLY while the macos-tahoe or
+# macos-tahoe-light theme is active. Any other theme gets the apps' defaults
+# back, so it looks the way that theme (and the app) intends.
+# $1 is the theme slug that was just set.
+set -u
+
+theme="${1:-}"
+mac=false
+[[ $theme == "macos-tahoe" || $theme == "macos-tahoe-light" ]] && mac=true
+
+BEGIN="# macos-tahoe begin"
+END="# macos-tahoe end"
+
+# Drop our marked block from a config file.
+strip_block() {
+  [[ -f $1 ]] && sed -i "/^$BEGIN\$/,/^$END\$/d" "$1"
+}
+
+# Append a marked block (only while a macOS theme is active).
+add_block() {
+  local file="$1"; shift
+  [[ -f $file ]] || return 0
+  strip_block "$file"
+  $mac || return 0
+  { echo "$BEGIN"; printf '%s\n' "$@"; echo "$END"; } >>"$file"
+}
+
+# GTK / libadwaita / Electron / Chromium read the GNOME button layout.
+if $mac; then
+  gsettings set org.gnome.desktop.wm.preferences button-layout ':'
+else
+  gsettings reset org.gnome.desktop.wm.preferences button-layout
+fi
+for ini in "$HOME/.config/gtk-3.0/settings.ini" "$HOME/.config/gtk-4.0/settings.ini"; do
+  [[ -f $ini ]] || continue
+  sed -i '/^gtk-decoration-layout=/d' "$ini"
+  $mac && echo 'gtk-decoration-layout=:' >>"$ini"
+done
+
+# VS Code: hide its own window controls (skipped if settings.json has comments).
+vscode="$HOME/.config/Code/User/settings.json"
+if [[ -f $vscode ]] && jq empty "$vscode" 2>/dev/null; then
+  if $mac; then
+    jq '."window.titleBarStyle" = "custom" | ."window.controlsStyle" = "hidden"' "$vscode" >"$vscode.tmp"
+  else
+    jq 'del(."window.controlsStyle")' "$vscode" >"$vscode.tmp"
+  fi && mv "$vscode.tmp" "$vscode"
+fi
+
+# Obsidian: hidden window frame (takes effect on next launch).
+obsidian="$HOME/.config/obsidian/obsidian.json"
+if [[ -f $obsidian ]] && jq empty "$obsidian" 2>/dev/null; then
+  if $mac; then
+    jq -c '.frame = "hidden"' "$obsidian" >"$obsidian.tmp"
+  else
+    jq -c 'del(.frame)' "$obsidian" >"$obsidian.tmp"
+  fi && mv "$obsidian.tmp" "$obsidian"
+fi
+
+# Terminals that can draw their own titlebar.
+add_block "$HOME/.config/ghostty/config" "window-decoration = none" "gtk-titlebar = false"
+add_block "$HOME/.config/kitty/kitty.conf" "hide_window_decorations yes"
+
+# ---------------------------------------------------------------------------
+# Bar, cursor and UI font. Each side (macOS / every other theme) keeps its own
+# snapshot, so whatever you change while on one side is restored next time.
+#   ~/.config/omarchy/macos-tahoe/bar-macos.json    bar while on macOS Tahoe
+#   ~/.config/omarchy/macos-tahoe/bar-default.json  bar for every other theme
+#   ~/.config/omarchy/macos-tahoe/default.env       cursor + font for other themes
+# ---------------------------------------------------------------------------
+SNAP="$HOME/.config/omarchy/macos-tahoe"
+MODE_FILE="$SNAP/mode"
+SHELL_JSON="$HOME/.config/omarchy/shell.json"
+mkdir -p "$SNAP"
+mode=$(cat "$MODE_FILE" 2>/dev/null || echo default)
+
+save_bar() { jq '.bar' "$SHELL_JSON" >"$1.tmp" && mv "$1.tmp" "$1"; }
+load_bar() {
+  [[ -s $1 ]] || return 0
+  jq --slurpfile bar "$1" '.bar = $bar[0]' "$SHELL_JSON" >"$SHELL_JSON.tmp" &&
+    cat "$SHELL_JSON.tmp" >"$SHELL_JSON" && rm -f "$SHELL_JSON.tmp"
+  omarchy-bar sync-glass >/dev/null 2>&1 || true
+}
+
+apply_cursor_font() {
+  local cursor="$1" size="$2" font="$3" docfont="$4"
+  gsettings set org.gnome.desktop.interface cursor-theme "$cursor"
+  gsettings set org.gnome.desktop.interface cursor-size "$size"
+  gsettings set org.gnome.desktop.interface font-name "$font"
+  gsettings set org.gnome.desktop.interface document-font-name "$docfont"
+  for ini in "$HOME/.config/gtk-3.0/settings.ini" "$HOME/.config/gtk-4.0/settings.ini"; do
+    [[ -f $ini ]] && sed -i "s/^gtk-cursor-theme-name=.*/gtk-cursor-theme-name=$cursor/" "$ini"
+  done
+  hyprctl setcursor "$cursor" "$size" >/dev/null 2>&1 || true
+}
+
+if $mac && [[ $mode != mac ]]; then
+  # Leaving the other themes: remember their bar, cursor and font first.
+  [[ -f $SHELL_JSON ]] && save_bar "$SNAP/bar-default.json"
+  {
+    echo "CURSOR=$(gsettings get org.gnome.desktop.interface cursor-theme)"
+    echo "CURSOR_SIZE=$(gsettings get org.gnome.desktop.interface cursor-size)"
+    echo "FONT=$(gsettings get org.gnome.desktop.interface font-name)"
+    echo "DOCFONT=$(gsettings get org.gnome.desktop.interface document-font-name)"
+  } >"$SNAP/default.env"
+  load_bar "$SNAP/bar-macos.json"
+  echo mac >"$MODE_FILE"
+elif ! $mac && [[ $mode == mac ]]; then
+  [[ -f $SHELL_JSON ]] && save_bar "$SNAP/bar-macos.json"
+  load_bar "$SNAP/bar-default.json"
+  echo default >"$MODE_FILE"
+fi
+
+if $mac; then
+  # Fall back to the current cursor / font when the macOS ones aren't installed.
+  mac_cursor=macOS
+  [[ -d /usr/share/icons/macOS || -d $HOME/.local/share/icons/macOS || -d $HOME/.icons/macOS ]] ||
+    mac_cursor=$(gsettings get org.gnome.desktop.interface cursor-theme | tr -d "'")
+  mac_font="Inter 11"
+  fc-list : family | grep -qx "Inter" || mac_font=$(gsettings get org.gnome.desktop.interface font-name | tr -d "'")
+  apply_cursor_font "$mac_cursor" 24 "$mac_font" "$mac_font"
+elif [[ -f $SNAP/default.env ]]; then
+  # shellcheck disable=SC1091
+  source "$SNAP/default.env"
+  apply_cursor_font "${CURSOR:-Adwaita}" "${CURSOR_SIZE:-24}" "${FONT:-Adwaita Sans 11}" "${DOCFONT:-Adwaita Sans 11}"
+fi
+
+exit 0
